@@ -161,6 +161,15 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+//     FROM: https://www.gnu.org/software/libc/manual/html_node/Process-Signal-Mask.html
+//     The sigprocmask function is used to examine or change the calling process’s signal mask. The how argument determines how the signal mask is changed, and must be one of the following values:
+//     SIG_BLOCK
+//     Block the signals in set—add them to the existing mask. In other words, the new mask is the union of the existing mask and set.
+//     SIG_UNBLOCK
+//     Unblock the signals in set—remove them from the existing mask.
+//     SIG_SETMASK
+//     Use set for the mask; ignore the previous value of the mask.
+
     /* 
     * 1. need to check if it is a valid argument
     * 2. check if it is a buildin function
@@ -172,32 +181,44 @@ void eval(char *cmdline)
     */
     char *argv[MAXARGS];    //Argument list execve()
     char buf[MAXLINE];      //Holds modified copppmand line
-    int bg;
-    //pid_t pid;              //Process ID
-    pid_t child_pid = fork();
+    int bg;             //Process ID
     strcpy(buf, cmdline);
+    sigset_t mask;  // declares a signal set type
     bg = parseline(buf, argv);  // true = background, false = foreground
-    if (argv[0] == NULL)    //Ignore empty lines
+    if (argv[0] == NULL){    //Ignore empty lines
         return;
+    }
     if(!builtin_cmd(argv)){ // will execute builtin command if found
-        // since it is not in the builtin command we need to execute it
-
-        //pid_t child_pid = fork();
-        if((child_pid = fork()) == 0){    // makes a child, then executes the command (pid inside child (inside the if loop)is 0)
+        //------Signal Blocking Starts -----------
+        sigemptyset(&mask); //initializes the signal set set to exclude all of the defined signals. It always returns 0.
+        sigaddset(&mask,SIGCHLD);   //This function adds the signal signum to the signal set set. All sigaddset does is modify set; it does not block or unblock any signals.
+        sigprocmask(SIG_BLOCK, &mask,NULL); //examine and change blocked signals
+        pid_t pid;
+        if((pid = fork()) == 0){    // makes a child, then executes the command (pid inside child (inside the if loop)is 0)
+            setpgid(0, 0);
+  	        sigprocmask(SIG_UNBLOCK, &mask,NULL);   // Unblock for child
             if(execve(argv[0], argv, environ) < 0){
                 printf("%s: Command not found.\n", argv[0]); 
                 exit(0);
             }
         }
-        
         if (!bg) {  /* Parent waits for foreground "child" job to terminate */
-            addjob(jobs, child_pid, FG, cmdline);
-            int status;
-            if (waitpid(child_pid, &status, 0) < 0)   // if the returned pid is less than 0
-            perror("Child Error Occurred"); //unix_error("waitfg: waitpid error");
+            int worked = addjob(jobs, pid, FG, cmdline);
+            if (worked) {
+                sigprocmask(SIG_UNBLOCK,&mask,NULL);    // Unblock for parent
+                waitfg(pid);
+            }else{
+                kill(-pid,SIGINT); //Else kill the child
+            }
         }
         else{   /* If it is a background command do something ... */
-            printf("%d %s", child_pid, cmdline);
+            int worked = addjob(jobs, pid, BG, cmdline);
+            if (worked){
+                sigprocmask(SIG_UNBLOCK,&mask,NULL);    // Unblock for parent
+                printf("[%d] (%d) %s",pid2jid(pid), pid, cmdline);
+            }else{
+                kill(-pid,SIGINT); //Else kill the child
+            }
         }
     }
     return;
@@ -266,9 +287,10 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
-    //printf("COMMAND YOU TYPED %s \n",argv[0]);
+    //return 0;
+    //printf(argv[0]);
     if (!strcmp(argv[0], "quit")){ /* quit command */
-	    exit(0);  
+	    exit(0);
     }
     if (!strcmp(argv[0], "jobs")){   //revise need to do the jobs
         listjobs(jobs);
@@ -281,35 +303,84 @@ int builtin_cmd(char **argv)
     return 0;     /* not a builtin command */
 }
 
+
+void do_bgfg(char **argv) 
+{
+  struct job_t *jobp=NULL;
+    
+  /* Ignore command if no argument */
+  if (argv[1] == NULL) {
+    printf("%s command requires PID or %%jobid argument\n", argv[0]);
+    return;
+  }
+    
+  /* Parse the required PID or %JID arg */
+  if (isdigit(argv[1][0])) {
+    pid_t pid = atoi(argv[1]);
+    if (!(jobp = getjobpid(jobs, pid))) {
+      printf("(%d): No such process\n", pid);
+      return;
+    }
+  }
+  else if (argv[1][0] == '%') {
+    int jid = atoi(&argv[1][1]);
+    if (!(jobp = getjobjid(jobs, jid))) {
+      printf("%s: No such job\n", argv[1]);
+      return;
+    }
+  }	    
+  else {
+    printf("%s: argument must be a PID or %%jobid\n", argv[0]);
+    return;
+  }
+  kill(-jobp->pid,SIGCONT);
+  if(!strcmp(argv[0], "fg")){
+	jobp->state = FG;
+	waitfg(jobp->pid);
+} else {
+	jobp->state = BG;
+    printf("[%d] (%d) %s",jobp->jid,jobp->pid,jobp->cmdline);
+}
+  return;
+}
+
+
+
+
+
+
+
 /* 
  * do_bgfg - Execute the builtin bg and fg commands
  */
-void do_bgfg(char **argv) 
-{
-     /* 
-    * do_bgfg put process either in the backgroud or foreground
-    *   
-    * E.G bg %1
-    * 
-    * 1. the first argument is either fg or bg as confirmed in builtin command
-    * 2. need to check if they have an approiate argument
-    * 3. check if the second argument starts with % else invalid
-    * 4. check if the what follows % is a number and a valid pid  
-    * 
-    */
-    if (!strcmp(argv[0], "fg")){    //foreground and background
-        printf("It is foreground");
-    }else{ // bg processes goes here
-        printf("It is background");
-    }
-    return;
-}
+// void do_bgfg(char **argv) 
+// {
+//     struct job_t *jobp=NULL;
+//      /* 
+//     * do_bgfg put process either in the backgroud or foreground
+//     *   
+//     * E.G bg %1
+//     * 
+//     * 1. the first argument is either fg or bg as confirmed in builtin command
+//     * 2. need to check if they have an approiate argument
+//     * 3. check if the second argument starts with % else invalid
+//     * 4. check if the what follows % is a number and a valid pid  
+//     * 
+//     */
+//     if (!strcmp(argv[0], "fg")){    //foreground and background
+//         printf("It is foreground");
+//     }else{ // bg processes goes here
+//         printf("It is background");
+//     }
+//     return;
+// }
 
 /* 
  * waitfg - Block until process pid is no longer the foreground process
  */
 void waitfg(pid_t pid)
 {
+	while( fgpid(jobs)==pid );    // if the foreground of the fgpid is process pid then wait 
     return;
 }
 
@@ -326,7 +397,22 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
-    return;
+	pid_t pid; 
+	int status; 
+	while ((pid=waitpid((pid_t)-1,&status,WNOHANG|WUNTRACED)) > 0){ //While there are still children to kill 
+		//	fprintf(stderr,"Killed child with PID [%d]\n",pid); //Print out the child ID number that we killed
+		if(WIFSIGNALED(status)){
+			//fprintf(stderr, "Process %d recieved signal of type: %s.\n", pid,strsignal(WTERMSIG(status))); BETTER VERSION!!
+		    fprintf(stderr, "Job [%d] (%d) terminated by signal %d\n", pid2jid(pid),pid,WTERMSIG(status)); //LAME VERSION
+		}
+		else if(WIFSTOPPED(status))
+		{
+		    fprintf(stderr, "Job [%d] (%d) stopped by signal %d\n", pid2jid(pid),pid,WSTOPSIG(status)); //LAME VERSION	
+		    return;
+		}
+		deletejob(jobs, pid); //Reaper 
+	} 
+  return;
 }
 
 /* 
@@ -336,6 +422,8 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
+    pid_t fgid=fgpid(jobs);
+    kill(-fgid,SIGINT);
     return;
 }
 
@@ -344,9 +432,18 @@ void sigint_handler(int sig)
  *     the user types ctrl-z at the keyboard. Catch it and suspend the
  *     foreground job by sending it a SIGTSTP.  
  */
+//struct job_t *getjobpid(struct job_t *jobs, pid_t pid) {
 void sigtstp_handler(int sig) 
 {
-    return;
+    //printf("%s","I am a huge idiot");
+	pid_t fgid=fgpid(jobs);
+    if(fgid) 
+    {
+		kill(-fgid,SIGTSTP);
+    	(*getjobpid(jobs,fgid)).state = ST;
+	}	
+	
+  return;
 }
 
 /*********************
