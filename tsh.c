@@ -159,8 +159,7 @@ int main(int argc, char **argv)
  * background children don't receive SIGINT (SIGTSTP) from the kernel
  * when we type ctrl-c (ctrl-z) at the keyboard.  
 */
-void eval(char *cmdline) 
-{
+void eval(char *cmdline) {
 //     FROM: https://www.gnu.org/software/libc/manual/html_node/Process-Signal-Mask.html
 //     The sigprocmask function is used to examine or change the calling process’s signal mask. The how argument determines how the signal mask is changed, and must be one of the following values:
 //     SIG_BLOCK
@@ -181,14 +180,13 @@ void eval(char *cmdline)
     */
     char *argv[MAXARGS];    //Argument list execve()
     char buf[MAXLINE];      //Holds modified copppmand line
-    int bg;             //Process ID
     strcpy(buf, cmdline);
     sigset_t mask;  // declares a signal set type
-    bg = parseline(buf, argv);  // true = background, false = foreground
+    int bg = parseline(buf, argv);  //Process ID, true = background, false = foreground
     if (argv[0] == NULL){    //Ignore empty lines
         return;
     }
-    if(!builtin_cmd(argv)){ // will execute builtin command if found
+    if(!builtin_cmd(argv)) { // will execute builtin command if found
         //------Signal Blocking Starts -----------
         sigemptyset(&mask); //initializes the signal set set to exclude all of the defined signals. It always returns 0.
         sigaddset(&mask,SIGCHLD);   //This function adds the signal signum to the signal set set. All sigaddset does is modify set; it does not block or unblock any signals.
@@ -287,99 +285,111 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
-    //return 0;
-    //printf(argv[0]);
     if (!strcmp(argv[0], "quit")){ /* quit command */
 	    exit(0);
-    }
-    if (!strcmp(argv[0], "jobs")){   //revise need to do the jobs
+    } else if (!strcmp(argv[0], "jobs")){   //revise need to do the jobs
         listjobs(jobs);
         return 1;   
-    }
-    if (!strcmp(argv[0], "bg") || !strcmp(argv[0], "fg")){    //foreground and background
+    } else if (!strcmp(argv[0], "bg") || !strcmp(argv[0], "fg")){    //foreground and background
         do_bgfg(argv);
         return 1;
+    } else {
+        return 0;
     }
-    return 0;     /* not a builtin command */
 }
 
 
-void do_bgfg(char **argv) 
-{
-  struct job_t *jobp=NULL;
-    
-  /* Ignore command if no argument */
-  if (argv[1] == NULL) {
-    printf("%s command requires PID or %%jobid argument\n", argv[0]);
-    return;
-  }
-    
-  /* Parse the required PID or %JID arg */
-  if (isdigit(argv[1][0])) {
-    pid_t pid = atoi(argv[1]);
-    if (!(jobp = getjobpid(jobs, pid))) {
-      printf("(%d): No such process\n", pid);
-      return;
-    }
-  }
-  else if (argv[1][0] == '%') {
-    int jid = atoi(&argv[1][1]);
-    if (!(jobp = getjobjid(jobs, jid))) {
-      printf("%s: No such job\n", argv[1]);
-      return;
-    }
-  }	    
-  else {
-    printf("%s: argument must be a PID or %%jobid\n", argv[0]);
-    return;
-  }
-  kill(-jobp->pid,SIGCONT);
-  if(!strcmp(argv[0], "fg")){
-	jobp->state = FG;
-	waitfg(jobp->pid);
-} else {
-	jobp->state = BG;
-    printf("[%d] (%d) %s",jobp->jid,jobp->pid,jobp->cmdline);
-}
-  return;
-}
-
-
-
-
-
-
-
-/* 
- * do_bgfg - Execute the builtin bg and fg commands
- */
 // void do_bgfg(char **argv) 
 // {
-//     struct job_t *jobp=NULL;
-//      /* 
-//     * do_bgfg put process either in the backgroud or foreground
-//     *   
-//     * E.G bg %1
-//     * 
-//     * 1. the first argument is either fg or bg as confirmed in builtin command
-//     * 2. need to check if they have an approiate argument
-//     * 3. check if the second argument starts with % else invalid
-//     * 4. check if the what follows % is a number and a valid pid  
-//     * 
-//     */
-//     if (!strcmp(argv[0], "fg")){    //foreground and background
-//         printf("It is foreground");
-//     }else{ // bg processes goes here
-//         printf("It is background");
-//     }
+//   struct job_t *jobp=NULL;
+    
+//   /* Ignore command if no argument */
+//   if (argv[1] == NULL) {
+//     printf("%s command requires PID or %%jobid argument\n", argv[0]);
 //     return;
+//   }
+    
+//   /* Parse the required PID or %JID arg */
+//   if (isdigit(argv[1][0])) {
+//     pid_t pid = atoi(argv[1]);
+//     if (!(jobp = getjobpid(jobs, pid))) {
+//       printf("(%d): No such process\n", pid);
+//       return;
+//     }
+//   }
+//   else if (argv[1][0] == '%') {
+//     int jid = atoi(&argv[1][1]);
+//     if (!(jobp = getjobjid(jobs, jid))) {
+//       printf("%s: No such job\n", argv[1]);
+//       return;
+//     }
+//   }	    
+//   else {
+//     printf("%s: argument must be a PID or %%jobid\n", argv[0]);
+//     return;
+//   }
+//   kill(-jobp->pid,SIGCONT);
+//   if(!strcmp(argv[0], "fg")){
+// 	jobp->state = FG;
+// 	waitfg(jobp->pid);
+// } else {
+// 	jobp->state = BG;
+//     printf("[%d] (%d) %s",jobp->jid,jobp->pid,jobp->cmdline);
 // }
+//   return;
+// }
+
+void do_bgfg(char **argv) {
+    /* 
+    * do_bgfg put process either in the backgroud or foreground
+    *   
+    * E.G bg %1
+    * 
+    * 1. the first argument is either fg or bg as confirmed in builtin command
+    * 2. need to check if they have an approiate argument
+    * 3. check if the second argument starts with % else invalid
+    * 4. check if the what follows % is a number and a valid pid  
+    * 5. Sent Cont Signal and set new states
+    */
+    struct job_t *comp_job;
+    if(argv[1] == NULL){
+        printf("%s command requires PID or %%jobid argument\n", argv[0]);
+        return;    
+    }
+    else if (isdigit(argv[1][0])) {
+        pid_t pid = atoi(argv[1]);
+        if (!(comp_job = getjobpid(jobs, pid))) {
+        printf("(%d): No such process\n", pid);
+        return;
+        }
+    } 
+    else if (argv[1][0] == '%') {
+        int jid = atoi(&argv[1][1]);
+        if (!(comp_job= getjobjid(jobs, jid))) {
+            printf("%s: No such job\n", argv[1]);
+            return;
+        }
+    }
+    else if (!(isdigit(argv[1][0])) || argv[1][0] != '%') { // if it is not a digit or
+        printf("%s: argument must be a PID or %%jobid\n", argv[0]);
+        return;
+    }
+    kill(-comp_job->pid,SIGCONT); // for both bg and fg you need to send cont signal to run it
+    if(!strcmp(argv[0], "bg")){    // set new state
+	    comp_job->state = BG;
+        printf("[%d] (%d) %s",comp_job->jid,comp_job->pid,comp_job->cmdline);
+    } else {    // set new state
+        comp_job->state = FG;
+	    waitfg(comp_job->pid);  // wait for foreground to finish
+    }
+    return;
+}
+
 
 /* 
  * waitfg - Block until process pid is no longer the foreground process
  */
-void waitfg(pid_t pid)
-{
+void waitfg(pid_t pid){
 	while( fgpid(jobs)==pid );    // if the foreground of the fgpid is process pid then wait 
     return;
 }
@@ -397,22 +407,21 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
-	pid_t pid; 
-	int status; 
-	while ((pid=waitpid((pid_t)-1,&status,WNOHANG|WUNTRACED)) > 0){ //While there are still children to kill 
-		//	fprintf(stderr,"Killed child with PID [%d]\n",pid); //Print out the child ID number that we killed
-		if(WIFSIGNALED(status)){
-			//fprintf(stderr, "Process %d recieved signal of type: %s.\n", pid,strsignal(WTERMSIG(status))); BETTER VERSION!!
-		    fprintf(stderr, "Job [%d] (%d) terminated by signal %d\n", pid2jid(pid),pid,WTERMSIG(status)); //LAME VERSION
-		}
-		else if(WIFSTOPPED(status))
-		{
-		    fprintf(stderr, "Job [%d] (%d) stopped by signal %d\n", pid2jid(pid),pid,WSTOPSIG(status)); //LAME VERSION	
-		    return;
-		}
-		deletejob(jobs, pid); //Reaper 
-	} 
-  return;
+	int chld_status = -1;
+	while(1) {
+		pid_t wait_pid = waitpid((pid_t) -1, &chld_status, (WUNTRACED | WNOHANG));  // this waits for any signal
+		if(wait_pid < 1)							// If interrupted or no status available, stop handler
+			break;
+		if(WIFSTOPPED(chld_status)) {				// Child stopped
+			printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(wait_pid), wait_pid, WSTOPSIG(chld_status));
+			getjobpid(jobs, wait_pid)->state = ST;	// Set job state
+		} else if(WIFSIGNALED(chld_status)) {		// Child terminated by uncaught signal
+			printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(wait_pid), wait_pid, WTERMSIG(chld_status));
+			deletejob(jobs, wait_pid);				// Remove associated job
+		} else if(WIFEXITED(chld_status))			// Child exited "normally"
+			deletejob(jobs, wait_pid);				// Remove associated job
+	}
+    return;
 }
 
 /* 
@@ -420,8 +429,7 @@ void sigchld_handler(int sig)
  *    user types ctrl-c at the keyboard.  Catch it and send it along
  *    to the foreground job.  
  */
-void sigint_handler(int sig) 
-{
+void sigint_handler(int sig) {
     pid_t fgid=fgpid(jobs);
     kill(-fgid,SIGINT);
     return;
@@ -433,16 +441,13 @@ void sigint_handler(int sig)
  *     foreground job by sending it a SIGTSTP.  
  */
 //struct job_t *getjobpid(struct job_t *jobs, pid_t pid) {
-void sigtstp_handler(int sig) 
-{
-    //printf("%s","I am a huge idiot");
+void sigtstp_handler(int sig) {
 	pid_t fgid=fgpid(jobs);
-    if(fgid) 
-    {
+    //kill(-fgid,SIGTSTP);
+    if(fgid) {
 		kill(-fgid,SIGTSTP);
     	(*getjobpid(jobs,fgid)).state = ST;
 	}	
-	
   return;
 }
 
