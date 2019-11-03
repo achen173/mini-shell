@@ -1,7 +1,17 @@
 /* 
  * tsh - A tiny shell program with job control
  * 
- * <Put your name and login ID here>
+ * Alan Chen 31271652
+ * Chidinma Ejiofor 30773084
+ * 
+ * ECE322 Assignment 3 - Managing Shell
+ * 
+ * Work Cited Page:
+ * https://www.gnu.org/software/libc/manual/html_node/Process-Signal-Mask.html
+ * https://stackoverflow.com/questions/6757188/why-sigprocmask-is-used-to-block-sigchld-from-delivering-in-the-following-code
+ * https://stackoverflow.com/questions/33508997/waitpid-wnohang-wuntraced-how-do-i-use-these
+ * http://www.cs.cmu.edu/afs/cs/academic/class/15213-f13/www/recitations/rec9_anitazha.pdf
+ * https://gist.github.com/seanrivera
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -161,7 +171,6 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) {
     /*
-     * FROM: https://www.gnu.org/software/libc/manual/html_node/Process-Signal-Mask.html
      * The sigprocmask function is used to examine or change the calling process’s signal mask. The how argument determines how the signal mask is changed, and must be one of the following values:
      * SIG_BLOCK
      * Block the signals in set—add them to the existing mask. In other words, the new mask is the union of the existing mask and set.
@@ -387,10 +396,12 @@ void sigchld_handler(int sig)
         } else if(WIFSIGNALED(chld_status)) {		// Child terminated by signal
 			printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(wait_pid), wait_pid, WTERMSIG(chld_status));
 			deletejob(jobs, wait_pid);			
-		} else if(WIFCONTINUED(chld_status)) {      // if a child signal has been continued set to foreground and waitfg
+		} 
+        else if(WIFCONTINUED(chld_status)) {      // if a child signal has been continued set to foreground and waitfg
             getjobpid(jobs, wait_pid)->state = FG;
             waitfg(wait_pid);
-        } else if(WIFSTOPPED(chld_status)) {				// Child stopped
+        } 
+        else if(WIFSTOPPED(chld_status)) {				// Child stopped
 			printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(wait_pid), wait_pid, WSTOPSIG(chld_status));
 			getjobpid(jobs, wait_pid)->state = ST;	// Set job state
 		} else if(WIFEXITED(chld_status)){			        // Child exited
