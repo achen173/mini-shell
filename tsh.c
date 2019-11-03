@@ -160,41 +160,43 @@ int main(int argc, char **argv)
  * when we type ctrl-c (ctrl-z) at the keyboard.  
 */
 void eval(char *cmdline) {
-//     FROM: https://www.gnu.org/software/libc/manual/html_node/Process-Signal-Mask.html
-//     The sigprocmask function is used to examine or change the calling process’s signal mask. The how argument determines how the signal mask is changed, and must be one of the following values:
-//     SIG_BLOCK
-//     Block the signals in set—add them to the existing mask. In other words, the new mask is the union of the existing mask and set.
-//     SIG_UNBLOCK
-//     Unblock the signals in set—remove them from the existing mask.
-//     SIG_SETMASK
-//     Use set for the mask; ignore the previous value of the mask.
-
-    /* 
-    * 1. need to check if it is a valid argument
-    * 2. check if it is a buildin function
+    /*
+     * FROM: https://www.gnu.org/software/libc/manual/html_node/Process-Signal-Mask.html
+     * The sigprocmask function is used to examine or change the calling process’s signal mask. The how argument determines how the signal mask is changed, and must be one of the following values:
+     * SIG_BLOCK
+     * Block the signals in set—add them to the existing mask. In other words, the new mask is the union of the existing mask and set.
+     * SIG_UNBLOCK
+     * Unblock the signals in set—remove them from the existing mask.
+     * SIG_SETMASK
+     * Use set for the mask; ignore the previous value of the mask.
+     * --------------------STEPS TO COMPLETE--------------------
+     * 1. need to check if it is a valid argument
+     * 2. check if it is a buildin function
         * Yes - execute the build in function (jobs, exit, bg, fg)
         * No
+            * 0. We need to declare empty set, add sigChld, block for parent, 
+                * and then unblock when children executes to make sure we do not
+                * miss any signal from child since it is a race condition
             * 1. Stop all processes while running
             * 2. Fork than run the new process in child
-            * 3. if it is bg than add job to background job list, else foreground job list
+            * 3. if it is bg than add job to background job list, else foreground job list and waitfg
     */
-    char *argv[MAXARGS];    //Argument list execve()
-    char buf[MAXLINE];      //Holds modified copppmand line
+    char *argv[MAXARGS];        // Argument list execve()
+    char buf[MAXLINE];          // Holds modified copppmand line
     strcpy(buf, cmdline);
-    sigset_t mask;  // declares a signal set type
+    sigset_t mask;              // declares a signal set type
     int bg = parseline(buf, argv);  //Process ID, true = background, false = foreground
     if (argv[0] == NULL){    //Ignore empty lines
         return;
     }
     if(!builtin_cmd(argv)) { // will execute builtin command if found
         //------Signal Blocking Starts -----------
-        sigemptyset(&mask); //initializes the signal set set to exclude all of the defined signals. It always returns 0.
+        sigemptyset(&mask);         //initializes the signal set set to exclude all of the defined signals. It always returns 0.
         sigaddset(&mask,SIGCHLD);   //This function adds the signal signum to the signal set set. All sigaddset does is modify set; it does not block or unblock any signals.
-        sigprocmask(SIG_BLOCK, &mask,NULL); //examine and change blocked signals
+        sigprocmask(SIG_BLOCK, &mask,NULL); //blocked signals for parent
         pid_t pid;
         if((pid = fork()) == 0){    // makes a child, then executes the command (pid inside child (inside the if loop)is 0)
-            setpgid(0, 0);
-  	        sigprocmask(SIG_UNBLOCK, &mask,NULL);   // Unblock for child
+            setpgrp();
             if(execve(argv[0], argv, environ) < 0){
                 printf("%s: Command not found.\n", argv[0]); 
                 exit(0);
@@ -203,8 +205,8 @@ void eval(char *cmdline) {
         if (!bg) {  /* Parent waits for foreground "child" job to terminate */
             int worked = addjob(jobs, pid, FG, cmdline);
             if (worked) {
-                sigprocmask(SIG_UNBLOCK,&mask,NULL);    // Unblock for parent
-                waitfg(pid);
+            sigprocmask(SIG_UNBLOCK,&mask,NULL);    // Unblock for parent
+            waitfg(pid);
             }else{
                 kill(-pid,SIGINT); //Else kill the child
             }
@@ -287,6 +289,7 @@ int builtin_cmd(char **argv)
 {
     if (!strcmp(argv[0], "quit")){ /* quit command */
 	    exit(0);
+        return 1;
     } else if (!strcmp(argv[0], "jobs")){   //revise need to do the jobs
         listjobs(jobs);
         return 1;   
@@ -297,47 +300,6 @@ int builtin_cmd(char **argv)
         return 0;
     }
 }
-
-
-// void do_bgfg(char **argv) 
-// {
-//   struct job_t *jobp=NULL;
-    
-//   /* Ignore command if no argument */
-//   if (argv[1] == NULL) {
-//     printf("%s command requires PID or %%jobid argument\n", argv[0]);
-//     return;
-//   }
-    
-//   /* Parse the required PID or %JID arg */
-//   if (isdigit(argv[1][0])) {
-//     pid_t pid = atoi(argv[1]);
-//     if (!(jobp = getjobpid(jobs, pid))) {
-//       printf("(%d): No such process\n", pid);
-//       return;
-//     }
-//   }
-//   else if (argv[1][0] == '%') {
-//     int jid = atoi(&argv[1][1]);
-//     if (!(jobp = getjobjid(jobs, jid))) {
-//       printf("%s: No such job\n", argv[1]);
-//       return;
-//     }
-//   }	    
-//   else {
-//     printf("%s: argument must be a PID or %%jobid\n", argv[0]);
-//     return;
-//   }
-//   kill(-jobp->pid,SIGCONT);
-//   if(!strcmp(argv[0], "fg")){
-// 	jobp->state = FG;
-// 	waitfg(jobp->pid);
-// } else {
-// 	jobp->state = BG;
-//     printf("[%d] (%d) %s",jobp->jid,jobp->pid,jobp->cmdline);
-// }
-//   return;
-// }
 
 void do_bgfg(char **argv) {
     /* 
@@ -390,7 +352,7 @@ void do_bgfg(char **argv) {
  * waitfg - Block until process pid is no longer the foreground process
  */
 void waitfg(pid_t pid){
-	while( fgpid(jobs)==pid );    // if the foreground of the fgpid is process pid then wait 
+	while( fgpid(jobs) == pid );    // if the foreground of the fgpid is process pid then wait 
     return;
 }
 
@@ -407,19 +369,33 @@ void waitfg(pid_t pid){
  */
 void sigchld_handler(int sig) 
 {
+    /*
+     * WUNTRACED = return when child is stuck 
+     * WNOHANG = return immediately instead of waiting, if there is no child process ready to be noticed 
+     * WIFSTOPPED = check if stopped
+     * WIFSIGNALED = check if child has been terminated
+     * WIFEXITED = check if child is exit
+     * WSTOPSIG = gives us the number of which signal(PID) has been stopped
+     * WTERMSIG = gives us the number of which signal(PID) has been terminated
+     * WIFCONTINUED = check if the signal has been continued
+    */
 	int chld_status = -1;
 	while(1) {
 		pid_t wait_pid = waitpid((pid_t) -1, &chld_status, (WUNTRACED | WNOHANG));  // this waits for any signal
-		if(wait_pid < 1)							// If interrupted or no status available, stop handler
+		if(wait_pid < 1){							// If interrupted or no status available, stop handler
 			break;
-		if(WIFSTOPPED(chld_status)) {				// Child stopped
+        } else if(WIFSIGNALED(chld_status)) {		// Child terminated by signal
+			printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(wait_pid), wait_pid, WTERMSIG(chld_status));
+			deletejob(jobs, wait_pid);			
+		} else if(WIFCONTINUED(chld_status)) {      // if a child signal has been continued set to foreground and waitfg
+            getjobpid(jobs, wait_pid)->state = FG;
+            waitfg(wait_pid);
+        } else if(WIFSTOPPED(chld_status)) {				// Child stopped
 			printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(wait_pid), wait_pid, WSTOPSIG(chld_status));
 			getjobpid(jobs, wait_pid)->state = ST;	// Set job state
-		} else if(WIFSIGNALED(chld_status)) {		// Child terminated by uncaught signal
-			printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(wait_pid), wait_pid, WTERMSIG(chld_status));
-			deletejob(jobs, wait_pid);				// Remove associated job
-		} else if(WIFEXITED(chld_status))			// Child exited "normally"
-			deletejob(jobs, wait_pid);				// Remove associated job
+		} else if(WIFEXITED(chld_status)){			        // Child exited
+			deletejob(jobs, wait_pid);		
+        }
 	}
     return;
 }
@@ -430,8 +406,10 @@ void sigchld_handler(int sig)
  *    to the foreground job.  
  */
 void sigint_handler(int sig) {
+    // 0. get foreground id
+    // 1. send interupt signal to foreground id
     pid_t fgid=fgpid(jobs);
-    kill(-fgid,SIGINT);
+    kill(-fgid, SIGINT);
     return;
 }
 
@@ -440,10 +418,12 @@ void sigint_handler(int sig) {
  *     the user types ctrl-z at the keyboard. Catch it and suspend the
  *     foreground job by sending it a SIGTSTP.  
  */
-//struct job_t *getjobpid(struct job_t *jobs, pid_t pid) {
+
 void sigtstp_handler(int sig) {
+    // 0. get foreground id
+    // 1. stops foreground id
+    // 2. set new state
 	pid_t fgid=fgpid(jobs);
-    //kill(-fgid,SIGTSTP);
     if(fgid) {
 		kill(-fgid,SIGTSTP);
     	(*getjobpid(jobs,fgid)).state = ST;
